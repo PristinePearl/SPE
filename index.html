@@ -168,6 +168,9 @@ th{background:#f6f7fd;text-transform:uppercase;font-size:11px;letter-spacing:.05
 #login{background:radial-gradient(900px 500px at 15% 0,#dfe3ff,transparent),radial-gradient(700px 500px at 100% 100%,#f1e4ff,transparent),var(--bg)}
 .seg{border-radius:10px;background:#fff;padding:2px;gap:2px}.seg button{border-radius:8px}.seg button.on{background:linear-gradient(135deg,#4f46e5,#7c3aed)}
 .legend i{border-radius:50%}
+tfoot td{position:sticky;bottom:0;background:#eef0fb;font-weight:700;border-top:2px solid var(--line)}
+th.sortable{cursor:pointer}th.sortable:hover{color:var(--accent)}
+.wide .hb{grid-template-columns:minmax(120px,260px) 1fr auto 48px;padding:6px 0}.wide .hb .tr{height:12px}
 </style>
 </head>
 <body>
@@ -220,7 +223,7 @@ th{background:#f6f7fd;text-transform:uppercase;font-size:11px;letter-spacing:.05
       </div>
       <div class="grid2">
         <div class="card"><h3>By type</h3><div id="byType"></div></div>
-        <div class="card"><h3>By team</h3><div id="byTeam"></div></div>
+        <div class="card wide" style="grid-column:1/-1;order:-1"><h3>By team</h3><div id="byTeam"></div></div>
         <div class="card"><h3>Slot vs Commission</h3><div id="donut"></div></div>
         
       </div>
@@ -236,13 +239,14 @@ th{background:#f6f7fd;text-transform:uppercase;font-size:11px;letter-spacing:.05
         <div><label class="f">Team</label><select id="rTeam"></select></div>
                 <div class="grow"><label class="f">Search (emp id, name, ref no, narration)</label><input id="rQ" placeholder="Type to search…"></div>
         <div class="btns">
-          <div class="seg" id="rView"><button data-v="ref" class="on">Consolidated (Ref No)</button><button data-v="team">Team wise</button><button data-v="lines">All lines</button></div>
+          <select id="rView" style="width:auto;min-width:200px" title="Report type"><option value="ref">Consolidated (by Ref No)</option><option value="lines">All lines (detail)</option><option value="team">Team wise</option><option value="teammonth">Team × Month</option><option value="month">Month wise</option><option value="type">Type wise</option><option value="staff">Staff wise</option><option value="top">Top 10 staff (by value)</option><option value="desig">Designation wise</option></select>
+          <button class="btn qr" data-r="tm">This month</button><button class="btn qr" data-r="lm">Last month</button><button class="btn qr" data-r="fy">This FY</button>
           <button class="btn" id="rClear">Clear</button>
           <button class="btn" id="rCsv">Export Excel</button>
           <button class="btn" id="rPrint">Print</button>
         </div>
       </div>
-      <p class="sumline" id="rSum"></p>
+      <div class="pills" id="rSum"></div>
       <div class="tw"><table id="rTable"></table></div>
       <div style="text-align:center;margin:10px"><button class="btn hidden" id="rMore">Show more</button></div>
     </section>
@@ -326,7 +330,7 @@ th{background:#f6f7fd;text-transform:uppercase;font-size:11px;letter-spacing:.05
 /* ======================================================================
    SET THIS: paste your Apps Script Web app URL (Deploy > Web app > .../exec)
    ====================================================================== */
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyMPnA2dj_zeIO5QjIPqH0pQxCHpH3QhzZ73VC63c1d7sZhswAjQO7xR2fC7us-OcjXoQ/exec';
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxIBDH3NQfVshJxgaYJ4IEqf1mhsSEQ-is0EKeei8iiPcJr5dEXx_Xc5OIZn1dBYgfwIw/exec';
 const XLSX_CDN = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';   // only loaded for .xlsx upload / template
 
 /* ───────── helpers ───────── */
@@ -391,10 +395,11 @@ $('#btnRefresh').onclick = () => reload(true);
 
 /* ───────── data load ───────── */
 /* Staff: name / designation come from Manpower; Team / HQ saved on the row win, otherwise Manpower's value is used */
+const desigOf = m => m ? ((/sales/i.test(m.dept||'') && m.sdesig) ? m.sdesig : (m.desig||'')) : '';
 function enrich(r){
   const m = (r.type === 'STAFF' || /^\d+$/.test(r.empId)) ? mpGet(r.empId) : null;
   if(r.type === 'STAFF' || m){
-    r.name = m ? m.name : ''; r.desig = m ? m.desig : ''; r.found = !!m;
+    r.name = m ? m.name : ''; r.desig = desigOf(m); r.found = !!m;
     if(m && m.team) r.team = m.team;          // Team always follows Manpower's "Team Wise" for staff
     if(!r.hq && m) r.hq = m.hq || '';
   } else { r.name=''; r.desig=''; r.found=true; }
@@ -483,7 +488,7 @@ function renderDash(){
   $('#monthChart').innerHTML = monthChart(data);
 
   hbars('#byType', groupMeasure(recs, r=>r.type||'(none)'));
-  hbars('#byTeam', groupMeasure(recs, r=>r.team||'(not set)'), 10);
+  hbars('#byTeam', groupMeasure(recs, r=>r.team||'(not set)'), 15);
   donut('#donut', measure(slot), measure(com));
 
 }
@@ -539,10 +544,17 @@ $('#monthChart').addEventListener('mouseleave', hideTip);
 let rView='ref', rLimit=150; const expanded=new Set();
 ['rFrom','rTo','rCat','rType','rTeam'].forEach(id => $('#'+id).addEventListener('change', () => renderReport(true)));
 $('#rQ').addEventListener('input', () => { clearTimeout(window.__q); window.__q=setTimeout(()=>renderReport(true),200); });
-$('#rView').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; rView=b.dataset.v; $$('#rView button').forEach(x=>x.classList.toggle('on',x===b)); renderReport(true); });
 $('#rClear').onclick = () => { ['rFrom','rTo','rCat','rType','rTeam','rQ'].forEach(id=>$('#'+id).value=''); renderReport(true); };
 $('#rMore').onclick = () => { rLimit += 150; renderReport(false); };
 $('#rPrint').onclick = () => window.print();
+function setRange(k){
+  const d=new Date(), y=d.getFullYear(), m=d.getMonth(), iso=(a,b,c)=>a+'-'+pad2(b+1)+'-'+pad2(c); let f,t;
+  if(k==='tm'){ f=iso(y,m,1); t=iso(y,m,new Date(y,m+1,0).getDate()); }
+  else if(k==='lm'){ const e=new Date(y,m,0); f=iso(e.getFullYear(),e.getMonth(),1); t=iso(e.getFullYear(),e.getMonth(),e.getDate()); }
+  else { const a=m>=3?y:y-1; f=iso(a,3,1); t=iso(a+1,2,31); }
+  $('#rFrom').value=f; $('#rTo').value=t; renderReport(true);
+}
+$$('.qr').forEach(b => b.onclick = () => setRange(b.dataset.r));
 
 function filtered(){
   const f=$('#rFrom').value, t=$('#rTo').value, c=$('#rCat').value, ty=$('#rType').value, tm=$('#rTeam').value, q=$('#rQ').value.trim().toLowerCase();
@@ -559,28 +571,75 @@ function teamRows(rows){
   const m = new Map(); rows.forEach(r => { const k=r.team||'(not set)'; if(!m.has(k)) m.set(k,[]); m.get(k).push(r); });
   return Array.from(m, ([k,l]) => ({ k, refs:reqCount(l), n:l.length, s:sumV(l.filter(x=>x.category==='Slot')), c:sumV(l.filter(x=>x.category==='Commission')), v:sumV(l) })).sort((a,b)=>b.v-a.v||b.n-a.n);
 }
+const SUMMARY = {
+  team:  { head:'Team',        key:r => r.team || '(not set)' },
+  type:  { head:'Type',        key:r => r.type || '(none)' },
+  month: { head:'Month',       key:r => r.date ? r.date.slice(0,7) : '(no date)', fmt:k => /^\d{4}-\d{2}$/.test(k) ? MON[+k.slice(5)-1]+' '+k.slice(0,4) : k, asc:true },
+  staff: { head:'Emp ID',      key:r => r.type==='STAFF' ? r.empId : null, extra:true },
+  top:   { head:'Emp ID',      key:r => r.type==='STAFF' ? r.empId : null, extra:true, top:10 },
+  desig: { head:'Designation', key:r => r.type==='STAFF' ? (r.desig || '(not set)') : null }
+};
+let rSort = null;
+const mKey = r => r.date ? r.date.slice(0,7) : '';
+const mLab = k => k ? MON[+k.slice(5)-1]+' '+k.slice(0,4) : '(no date)';
+function buildSummary(rows){
+  if(rView==='teammonth'){
+    const months = uniq(rows.map(mKey)).sort(), teams = new Map();
+    rows.forEach(r => { const t=r.team||'(not set)', m=mKey(r); if(!teams.has(t)) teams.set(t,{}); const o=teams.get(t); o[m]=(o[m]||0)+(Number(r.value)||0); });
+    const list = Array.from(teams, ([t,o]) => ({ t, o, tot:months.reduce((a,m)=>a+(o[m]||0),0) })).sort((a,b)=>b.tot-a.tot);
+    const colTot = months.map(m => list.reduce((a,x)=>a+(x.o[m]||0),0));
+    return { head:['Team'].concat(months.map(mLab),['Total']), keys:null, num:[false].concat(months.map(()=>true),[true]),
+      body:list.map(x => [x.t].concat(months.map(m=>x.o[m]||''),[x.tot||''])), foot:['Total'].concat(colTot.map(v=>v||''),[colTot.reduce((a,b)=>a+b,0)||'']) };
+  }
+  const def = SUMMARY[rView], m = new Map();
+  const used = rows.filter(r => def.key(r) != null);
+  used.forEach(r => { const k=def.key(r); if(!m.has(k)) m.set(k,[]); m.get(k).push(r); });
+  const list = Array.from(m, ([k,l]) => ({ k, label:def.fmt?def.fmt(k):k, name:l[0].name||'', desig:l[0].desig||'', team:l[0].team||'', refs:reqCount(l), n:l.length,
+    s:sumV(l.filter(x=>x.category==='Slot')), c:sumV(l.filter(x=>x.category==='Commission')), v:sumV(l) }));
+  const tot = list.reduce((a,x)=>a+x.v,0), ex = !!def.extra;
+  const val = (x,k) => k==='label' ? x.k : x[k];
+  const byV = (a,b) => b.v-a.v || b.n-a.n;
+  const bySel = (a,b) => { const A=val(a,rSort.k), B=val(b,rSort.k); return (typeof A==='string' ? A.localeCompare(B,undefined,{numeric:true}) : A-B) * rSort.d; };
+  let shown = list.slice();
+  if(def.top){ shown.sort(byV); shown = shown.slice(0,def.top); if(rSort) shown.sort(bySel); }
+  else shown.sort(rSort ? bySel : (def.asc ? (a,b)=>String(a.k).localeCompare(String(b.k)) : byV));
+  const keep = new Set(shown.map(x=>x.k)), usedF = used.filter(r=>keep.has(def.key(r)));
+  return { head:[def.head].concat(ex?['Name','Designation','Team']:[],['Ref Nos','Lines','Slot value','Commission value','Total value','Share']),
+    keys:['label'].concat(ex?['name','desig','team']:[],['refs','n','s','c','v',null]),
+    num:[false].concat(ex?[false,false,false]:[],[true,true,true,true,true,true]),
+    body:shown.map(x => [x.label].concat(ex?[x.name,x.desig,x.team]:[],[x.refs,x.n,x.s||'',x.c||'',x.v||'',tot?(Math.round(x.v/tot*1000)/10)+'%':''])),
+    foot:['Total'].concat(ex?['','','']:[],[reqCount(usedF),usedF.length,sumV(usedF.filter(x=>x.category==='Slot'))||'',sumV(usedF.filter(x=>x.category==='Commission'))||'',sumV(usedF)||'','']) };
+}
+function renderSummary(t){
+  const cell = (v,i) => '<td class="'+(t.num[i]?'num':'')+'">'+(typeof v==='number' ? inr(v) : esc(v==null?'':v))+'</td>';
+  const th = t.head.map((h,i) => { const k=t.keys&&t.keys[i]; return '<th class="'+(t.num[i]?'num ':'')+(k?'sortable':'')+'"'+(k?' data-s="'+k+'"':'')+'>'+esc(h)+(k&&rSort&&rSort.k===k?(rSort.d>0?' ▲':' ▼'):'')+'</th>'; }).join('');
+  $('#rTable').innerHTML = '<thead><tr>'+th+'</tr></thead><tbody>' + (t.body.map(r=>'<tr>'+r.map(cell).join('')+'</tr>').join('') || '<tr><td colspan="'+t.head.length+'" class="muted">No records match the filters</td></tr>') + '</tbody>' + (t.body.length ? '<tfoot><tr>'+t.foot.map(cell).join('')+'</tr></tfoot>' : '');
+  $('#rMore').classList.add('hidden');
+}
+$('#rTable').addEventListener('click', e => {
+  const th = e.target.closest('th[data-s]'); if(!th) return; const k = th.dataset.s;
+  rSort = (rSort && rSort.k===k) ? { k, d:-rSort.d } : { k, d:/^(label|name|desig|team)$/.test(k) ? 1 : -1 };
+  renderReport(false);
+});
+$('#rView').addEventListener('change', e => { rView = e.target.value; rSort = null; renderReport(true); });
+const isSummary = () => rView==='teammonth' || !!SUMMARY[rView];
 function renderReport(reset){
   if(reset) rLimit=150;
   const rows = filtered();
-  $('#rSum').textContent = rows.length.toLocaleString('en-IN') + ' entries · ' + reqCount(rows) + ' Ref Nos · Total ₹ ' + inr(rows.reduce((s,r)=>s+(Number(r.value)||0),0));
+  $('#rSum').innerHTML = '<span class="pill">'+inr(rows.length)+' entries</span><span class="pill">'+reqCount(rows)+' Ref Nos</span><span class="pill ok">Total ₹ '+inr(sumV(rows))+'</span><span class="pill">Slot ₹ '+inr(sumV(rows.filter(x=>x.category==='Slot')))+'</span><span class="pill">Commission ₹ '+inr(sumV(rows.filter(x=>x.category==='Commission')))+'</span>';
+  if(isSummary()){ renderSummary(buildSummary(rows)); return; }
   const tb = $('#rTable'); let more=false;
-  if(rView==='team'){
-    const ts = teamRows(rows);
-    tb.innerHTML = '<thead><tr><th>Team</th><th class="num">Ref Nos</th><th class="num">Lines</th><th class="num">Slot value</th><th class="num">Commission value</th><th class="num">Total value</th></tr></thead><tbody>' +
-      (ts.map(t => '<tr><td><b>'+esc(t.k)+'</b></td><td class="num">'+t.refs+'</td><td class="num">'+t.n+'</td><td class="num">'+(t.s?inr(t.s):'')+'</td><td class="num">'+(t.c?inr(t.c):'')+'</td><td class="num"><b>'+(t.v?inr(t.v):'')+'</b></td></tr>').join('') || '<tr><td colspan="6" class="muted">No records match the filters</td></tr>') + '</tbody>';
-    $('#rMore').classList.add('hidden'); return;
-  }
   if(rView==='lines'){
     const part = rows.slice(0, rLimit); more = rows.length > rLimit;
     tb.innerHTML = LINE_HEAD + '<tbody>' + (part.map(lineRow).join('') || '<tr><td colspan="10" class="muted">No records match the filters</td></tr>') + '</tbody>';
   } else {
     const gs = groupByRef(rows); const part = gs.slice(0, rLimit); more = gs.length > rLimit;
-    tb.innerHTML = '<thead><tr><th></th><th>Date</th><th>Ref No</th><th>Category</th><th>Types</th><th>Team</th><th class="num">Lines</th><th class="num">Value</th><th>Narration</th></tr></thead><tbody>' +
+    tb.innerHTML = '<thead><tr><th></th><th>Date</th><th>Ref No</th><th>Category</th><th>Types</th><th>Team</th><th class="num">Value</th></tr></thead><tbody>' +
       (part.map(g => {
         const open = expanded.has(g.k);
-        return '<tr data-k="'+esc(g.k)+'" style="cursor:pointer" title="Click to show / hide lines"><td>'+(open?'▾':'▸')+'</td><td class="nw">'+fmtD(g.date)+'</td><td class="nw"><b>'+esc(g.ref)+'</b></td><td>'+catTag(g.cat)+'</td><td>'+esc(joinU(g.lines.map(l=>l.type),3))+'</td><td>'+esc(joinU(g.lines.map(l=>l.team),3))+'</td><td class="num">'+g.lines.length+'</td><td class="num">'+(g.v?inr(g.v):'')+'</td><td>'+esc(g.nar)+'</td></tr>' +
-          (open ? '<tr class="sub"><td colspan="9"><table>'+LINE_HEAD+'<tbody>'+g.lines.map(lineRow).join('')+'</tbody></table></td></tr>' : '');
-      }).join('') || '<tr><td colspan="9" class="muted">No records match the filters</td></tr>') + '</tbody>';
+        return '<tr data-k="'+esc(g.k)+'" style="cursor:pointer" title="Click to show / hide lines"><td>'+(open?'▾':'▸')+'</td><td class="nw">'+fmtD(g.date)+'</td><td class="nw"><b>'+esc(g.ref)+'</b></td><td>'+catTag(g.cat)+'</td><td>'+esc(joinU(g.lines.map(l=>l.type),3))+'</td><td>'+esc(joinU(g.lines.map(l=>l.team),3))+'</td><td class="num">'+(g.v?inr(g.v):'')+'</td></tr>' +
+          (open ? '<tr class="sub"><td colspan="7"><table>'+LINE_HEAD+'<tbody>'+g.lines.map(lineRow).join('')+'</tbody></table></td></tr>' : '');
+      }).join('') || '<tr><td colspan="7" class="muted">No records match the filters</td></tr>') + '</tbody>';
   }
   $('#rMore').classList.toggle('hidden', !more);
 }
@@ -591,9 +650,7 @@ $('#rTable').addEventListener('click', e => {
 $('#rCsv').onclick = () => {
   const rows = filtered(); if(!rows.length){ toast('Nothing to export', true); return; }
   let head, body;
-  if(rView==='team'){
-    exportXlsx([['TEAM','REF NOS','LINES','SLOT VALUE','COMMISSION VALUE','TOTAL VALUE']].concat(teamRows(rows).map(t=>[t.k,t.refs,t.n,t.s||'',t.c||'',t.v||''])), 'SPE_team_wise_'+todayYmd()); return;
-  }
+  if(isSummary()){ const t=buildSummary(rows); exportXlsx([t.head].concat(t.body,[t.foot]), 'SPE_'+rView+'_'+todayYmd()); return; }
   if(rView==='lines'){
     head = ['DATE','REF NO','CATEGORY','TYPE','EMP ID / NAME','NAME (MANPOWER)','DESIGNATION','TEAM','HQ','VALUE','NARRATION'];
     body = rows.map(r => [fmtD(r.date),r.refNo,r.category,r.type,r.empId,r.name,r.desig,r.team,r.hq,r.value,r.narration]);
@@ -638,7 +695,7 @@ function lookupChip(l){
   const id = String(l.emp).trim(); if(!id) return '<div class="chip hint">Enter Emp ID – details are fetched from Manpower</div>';
   if(!S.mp.size) return '<div class="chip hint">Manpower list not loaded</div>';
   const m = mpGet(id);
-  return m ? '<div class="chip ok">'+esc([m.name, m.desig].filter(Boolean).join(' · ') || 'Found')+'</div>' : '<div class="chip bad">Emp ID not found in Manpower</div>';
+  return m ? '<div class="chip ok">'+esc([m.name, desigOf(m)].filter(Boolean).join(' · ') || 'Found')+'</div>' : '<div class="chip bad">Emp ID not found in Manpower</div>';
 }
 function renderLines(){
   $('#lines').innerHTML = E.lines.map((l,i) =>
